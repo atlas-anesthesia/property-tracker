@@ -187,7 +187,7 @@
     };
   }
   function blankData() {
-    const out = {};
+    const out = { _properties: PROPERTIES.slice() };
     PROPERTIES.forEach(p => {
       out[p.id] = {};
       SERVICES.forEach(s => { out[p.id][s.id] = emptyService(); });
@@ -247,14 +247,17 @@
     );
   }
   function mergeData(remote) {
-    const merged = blankData();
-    if (!remote) return merged;
-    Object.keys(remote).forEach(pid => {
-      if (!merged[pid]) return;
-      Object.keys(remote[pid] || {}).forEach(sid => {
-        if (merged[pid][sid]) {
-          merged[pid][sid] = Object.assign({}, merged[pid][sid], remote[pid][sid]);
-        }
+    if (!remote) return blankData();
+    // Use the property list from remote data if present, else fall back to defaults
+    const propList = (Array.isArray(remote._properties) && remote._properties.length)
+      ? remote._properties.slice()
+      : PROPERTIES.slice();
+    const merged = { _properties: propList };
+    propList.forEach(p => {
+      merged[p.id] = {};
+      SERVICES.forEach(s => {
+        const remoteSvc = (remote[p.id] && remote[p.id][s.id]) || {};
+        merged[p.id][s.id] = Object.assign(emptyService(), remoteSvc);
       });
     });
     return merged;
@@ -410,12 +413,65 @@
   function toggleComplete(propId, svcId) {
     const current = state.data[propId][svcId];
     const nowComplete = !current.completed;
-    const completedDate = nowComplete && !current.completedDate ? todayISO() : current.completedDate;
-    updateService(propId, svcId, { completed: nowComplete, completedDate });
+    updateService(propId, svcId, {
+      completed: nowComplete,
+      completedDate: nowComplete ? (current.completedDate || todayISO()) : ''
+    });
     render();
   }
   function switchProperty(id) { state.activeProperty = id; state.expanded = null; render(); }
   function toggleExpand(svcId) { state.expanded = state.expanded === svcId ? null : svcId; render(); }
+
+  function romanize(num) {
+    const map = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
+                 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX'];
+    return map[num] || String(num);
+  }
+
+  function addProperty() {
+    const raw = prompt('What\'s the property name?');
+    if (!raw) return;
+    const name = raw.trim();
+    if (!name) return;
+
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    if (!id) {
+      alert('Please use letters or numbers in the name.');
+      return;
+    }
+
+    const props = (state.data._properties && state.data._properties.slice()) || PROPERTIES.slice();
+    if (props.some(p => p.id === id)) {
+      alert('A property with a similar name already exists. Try a different name.');
+      return;
+    }
+
+    const tag = romanize(props.length + 1);
+    props.push({ id, name, tag });
+    state.data._properties = props;
+    state.data[id] = {};
+    SERVICES.forEach(s => { state.data[id][s.id] = emptyService(); });
+
+    state.activeProperty = id;
+    state.expanded = null;
+    scheduleSave();
+    render();
+  }
+
+  function removeProperty() {
+    const props = (state.data._properties && state.data._properties.slice()) || PROPERTIES.slice();
+    if (props.length <= 1) return;
+    const meta = props.find(p => p.id === state.activeProperty);
+    if (!meta) return;
+    if (!confirm('Remove "' + meta.name + '" and all of its data? This cannot be undone.')) return;
+
+    state.data._properties = props.filter(p => p.id !== state.activeProperty);
+    delete state.data[state.activeProperty];
+    state.activeProperty = state.data._properties[0].id;
+    state.expanded = null;
+    scheduleSave();
+    render();
+  }
 
   function handleChipClick(propId, svcId, statusId) {
     const s = state.data[propId][svcId];
@@ -426,7 +482,7 @@
       const now = !s.callMade;
       updateService(propId, svcId, {
         callMade: now,
-        callDate: now && !s.callDate ? todayISO() : s.callDate
+        callDate: now ? (s.callDate || todayISO()) : ''
       });
       render();
     } else if (statusId === 'scheduled') {
@@ -567,10 +623,16 @@
   }
 
   function renderMainApp() {
-    const propData = state.data[state.activeProperty];
-    const completed = SERVICES.filter(s => propData[s.id].completed).length;
+    const props = (state.data && state.data._properties) || PROPERTIES;
+    // Make sure activeProperty actually exists (handles case where it was removed)
+    if (!props.some(p => p.id === state.activeProperty)) {
+      state.activeProperty = props[0].id;
+    }
+    const propData = state.data[state.activeProperty] || {};
+    const completed = SERVICES.filter(s => propData[s.id] && propData[s.id].completed).length;
     const progress = Math.round((completed / SERVICES.length) * 100);
-    const propName = PROPERTIES.find(p => p.id === state.activeProperty).name;
+    const propMeta = props.find(p => p.id === state.activeProperty) || props[0];
+    const propName = propMeta ? propMeta.name : state.activeProperty;
 
     return '<div class="min-h-screen w-full font-body text-stone-900 relative overflow-x-hidden">'
       + '<div class="paper-bg grain min-h-screen relative">'
@@ -622,10 +684,11 @@
   }
 
   function renderTabs() {
-    const tabs = PROPERTIES.map(p => {
+    const props = (state.data && state.data._properties) || PROPERTIES;
+    const tabs = props.map(p => {
       const isActive = p.id === state.activeProperty;
-      const propData = state.data[p.id];
-      const done = SERVICES.filter(s => propData[s.id].completed).length;
+      const propData = state.data[p.id] || {};
+      const done = SERVICES.filter(s => propData[s.id] && propData[s.id].completed).length;
       const buttonClasses = 'tab-btn ' + (isActive ? 'active ' : '')
         + 'flex items-center gap-3 px-4 sm:px-5 py-3 rounded-sm flex-1 sm:flex-none '
         + (isActive ? 'bg-stone-900 text-stone-50' : 'hover:bg-stone-900/5 ink');
@@ -640,8 +703,13 @@
       + '</button>';
     }).join('');
 
+    const addBtn = '<button id="add-property" class="flex items-center gap-2 px-4 py-3 rounded-sm border border-dashed border-stone-900/30 hover:border-stone-900/60 hover:bg-stone-900/5 transition-all" aria-label="Add property">'
+      + '<i data-lucide="plus" class="w-3.5 h-3.5" stroke-width="2" style="color: rgba(28,25,23,0.55);"></i>'
+      + '<span class="font-mono text-[10px] tracking-[0.2em] uppercase ink/55">Add</span>'
+    + '</button>';
+
     return '<nav class="mb-10">'
-      + '<div class="border-y rule py-2 flex flex-wrap gap-1 sm:gap-2">' + tabs + '</div>'
+      + '<div class="border-y rule py-2 flex flex-wrap gap-1 sm:gap-2 items-center">' + tabs + addBtn + '</div>'
     + '</nav>';
   }
 
@@ -821,10 +889,17 @@
   }
 
   function renderFooter() {
+    const props = (state.data && state.data._properties) || PROPERTIES;
+    const removeBtn = props.length > 1
+      ? '<button id="remove-property" class="hover:terra transition-colors uppercase tracking-[0.2em]">Remove this property</button><span class="ink/30">·</span>'
+      : '';
     return '<footer class="mt-16 pt-6 border-t rule">'
       + '<div class="flex items-center justify-between flex-wrap gap-3 font-mono text-[10px] tracking-[0.2em] uppercase ink/50">'
-        + '<span>Three properties · Five services each</span>'
-        + '<button id="export-btn" class="hover:terra transition-colors uppercase tracking-[0.2em]">Export backup</button>'
+        + '<span>' + props.length + ' propert' + (props.length === 1 ? 'y' : 'ies') + ' · Five services each</span>'
+        + '<div class="flex items-center gap-3 flex-wrap">'
+          + removeBtn
+          + '<button id="export-btn" class="hover:terra transition-colors uppercase tracking-[0.2em]">Export backup</button>'
+        + '</div>'
       + '</div>'
     + '</footer>';
   }
@@ -929,6 +1004,10 @@
     if (exportBtn) exportBtn.addEventListener('click', exportBackup);
     const logoutBtn = document.getElementById('logout-btn');
     if (logoutBtn) logoutBtn.addEventListener('click', handleSignOut);
+    const addPropBtn = document.getElementById('add-property');
+    if (addPropBtn) addPropBtn.addEventListener('click', addProperty);
+    const removePropBtn = document.getElementById('remove-property');
+    if (removePropBtn) removePropBtn.addEventListener('click', removeProperty);
   }
 
   // ============ INIT ============
