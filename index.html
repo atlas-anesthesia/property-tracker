@@ -195,7 +195,7 @@
     return out;
   }
 
-  // Pre-populated vendor data — seeded into a brand-new account on first sign-in.
+  // Vendor data that auto-fills the owner's account when it's empty.
   const DEFAULT_DATA = {
     townsend: {
       hvac:     { vendor: 'Schulz Heating & Cooling', phone: '(715) 627-2665', vendorPicked: true, callMade: true, callDate: '2026-01-14', scheduledDate: '', completed: false, completedDate: '', notes: '' },
@@ -221,6 +221,9 @@
   };
 
   const SCHEMA_VERSION = 3;
+
+  // Only this account gets the DEFAULT_DATA above. All other accounts start blank.
+  const SEED_EMAIL = 'josh@alldayinvestments.co';
   function esc(s) {
     if (s == null) return '';
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -323,33 +326,34 @@
     try {
       const snap = await getDoc(ref);
       const docData = snap.exists() ? snap.data() : null;
-      const currentVersion = (docData && docData.version) || 0;
+      const existingData = docData && docData.data;
 
-      if (currentVersion >= SCHEMA_VERSION) {
-        // Already migrated — just load what's there
-        state.data = mergeData(docData.data || blankData());
+      // If this account already has real vendor info, just load it.
+      if (existingData && hasMeaningfulData(existingData)) {
+        state.data = mergeData(existingData);
         return;
       }
 
-      // First load on this schema version — run migration once
-      const existingData = docData && docData.data;
+      // No real data yet — figure out what to start with.
       let migrated = null;
       try {
         const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
         if (raw) migrated = JSON.parse(raw);
       } catch (e) {}
 
-      if (existingData && hasMeaningfulData(existingData)) {
-        state.data = mergeData(existingData);
-      } else if (migrated && hasMeaningfulData(migrated)) {
+      const userEmail = (state.authUser && state.authUser.email) ? state.authUser.email.toLowerCase() : '';
+
+      if (migrated && hasMeaningfulData(migrated)) {
         state.data = mergeData(migrated);
-      } else {
+      } else if (userEmail === SEED_EMAIL) {
+        // Only the owner's account gets prefilled with the vendor data.
         state.data = mergeData(DEFAULT_DATA);
+      } else {
+        state.data = blankData();
       }
 
       await setDoc(ref, {
         data: state.data,
-        version: SCHEMA_VERSION,
         updatedAt: serverTimestamp()
       }, { merge: true });
     } catch (e) {
