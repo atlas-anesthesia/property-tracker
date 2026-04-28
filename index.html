@@ -162,7 +162,7 @@
   const PROPERTIES = [
     { id: 'townsend', name: 'Townsend', tag: 'I' },
     { id: 'kiel',     name: 'Kiel',     tag: 'II' },
-    { id: 'marian',   name: 'Marian',   tag: 'III' }
+    { id: 'marian',   name: 'Marion',   tag: 'III' }
   ];
 
   const SERVICES = [
@@ -195,35 +195,6 @@
     return out;
   }
 
-  // Vendor data that auto-fills the owner's account when it's empty.
-  const DEFAULT_DATA = {
-    townsend: {
-      hvac:     { vendor: 'Schulz Heating & Cooling', phone: '(715) 627-2665', vendorPicked: true, callMade: true, callDate: '2026-01-14', scheduledDate: '', completed: false, completedDate: '', notes: '' },
-      electric: { vendor: '', phone: '', vendorPicked: false, callMade: false, callDate: '', scheduledDate: '', completed: false, completedDate: '', notes: '' },
-      plumbing: { vendor: '', phone: '', vendorPicked: false, callMade: false, callDate: '', scheduledDate: '', completed: false, completedDate: '', notes: '' },
-      skirting: { vendor: '', phone: '', vendorPicked: false, callMade: false, callDate: '', scheduledDate: '', completed: false, completedDate: '', notes: '' },
-      gas:      { vendor: '', phone: '', vendorPicked: false, callMade: false, callDate: '', scheduledDate: '', completed: false, completedDate: '', notes: '' }
-    },
-    kiel: {
-      hvac:     { vendor: "Pieper's Indoor Aire-Care", phone: '(920) 207-3297', vendorPicked: true, callMade: false, callDate: '', scheduledDate: '', completed: false, completedDate: '', notes: 'Gas has to be connected first.' },
-      electric: { vendor: 'Olsen Electric — Mike + Alliant Energy', phone: '(715) 823-6882', vendorPicked: true, callMade: true, callDate: '2026-01-14', scheduledDate: '', completed: false, completedDate: '', notes: 'Temporary until Spring trench. Alternate vendor: Optimum Electric (920) 377-0897.' },
-      plumbing: { vendor: 'Maritime Plumbing', phone: '(920) 682-8794', vendorPicked: true, callMade: true, callDate: '2026-01-14', scheduledDate: '', completed: false, completedDate: '', notes: 'Call back when the electric is ready.' },
-      skirting: { vendor: '', phone: '', vendorPicked: false, callMade: false, callDate: '', scheduledDate: '', completed: false, completedDate: '', notes: '' },
-      gas:      { vendor: 'WPS', phone: '', vendorPicked: true, callMade: true, callDate: '2026-01-13', scheduledDate: '', completed: false, completedDate: '', notes: '' }
-    },
-    marian: {
-      hvac:     { vendor: '', phone: '', vendorPicked: false, callMade: false, callDate: '', scheduledDate: '', completed: false, completedDate: '', notes: 'Gas has to be connected first.' },
-      electric: { vendor: '', phone: '', vendorPicked: false, callMade: false, callDate: '', scheduledDate: '', completed: false, completedDate: '', notes: '' },
-      plumbing: { vendor: 'Scour Plumbing Drain and Sewer', phone: '(715) 460-3337', vendorPicked: true, callMade: true, callDate: '2026-04-22', scheduledDate: '', completed: false, completedDate: '', notes: 'Waiting on HVAC first.' },
-      skirting: { vendor: '', phone: '', vendorPicked: false, callMade: false, callDate: '', scheduledDate: '', completed: false, completedDate: '', notes: '' },
-      gas:      { vendor: 'Alliant Energy', phone: '', vendorPicked: true, callMade: false, callDate: '', scheduledDate: '', completed: false, completedDate: '', notes: 'Alliant is digging for gas and installing in the Spring.' }
-    }
-  };
-
-  const SCHEMA_VERSION = 3;
-
-  // Only this account gets the DEFAULT_DATA above. All other accounts start blank.
-  const SEED_EMAIL = 'josh@alldayinvestments.co';
   function esc(s) {
     if (s == null) return '';
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -248,10 +219,18 @@
   }
   function mergeData(remote) {
     if (!remote) return blankData();
-    // Use the property list from remote data if present, else fall back to defaults
-    const propList = (Array.isArray(remote._properties) && remote._properties.length)
-      ? remote._properties.slice()
-      : PROPERTIES.slice();
+    // Build a lookup of default property names/tags so renames propagate to existing accounts
+    const defaults = {};
+    PROPERTIES.forEach(p => { defaults[p.id] = p; });
+    let propList;
+    if (Array.isArray(remote._properties) && remote._properties.length) {
+      propList = remote._properties.map(p => {
+        const def = defaults[p.id];
+        return def ? { id: p.id, name: def.name, tag: def.tag } : Object.assign({}, p);
+      });
+    } else {
+      propList = PROPERTIES.slice();
+    }
     const merged = { _properties: propList };
     propList.forEach(p => {
       merged[p.id] = {};
@@ -331,29 +310,20 @@
       const docData = snap.exists() ? snap.data() : null;
       const existingData = docData && docData.data;
 
-      // If this account already has real vendor info, just load it.
-      if (existingData && hasMeaningfulData(existingData)) {
+      // If this account already has data, load and refresh it (handles renames like Marian → Marion).
+      if (existingData) {
         state.data = mergeData(existingData);
         return;
       }
 
-      // No real data yet — figure out what to start with.
+      // No doc yet — check legacy localStorage, otherwise start blank.
       let migrated = null;
       try {
         const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
         if (raw) migrated = JSON.parse(raw);
       } catch (e) {}
 
-      const userEmail = (state.authUser && state.authUser.email) ? state.authUser.email.toLowerCase() : '';
-
-      if (migrated && hasMeaningfulData(migrated)) {
-        state.data = mergeData(migrated);
-      } else if (userEmail === SEED_EMAIL) {
-        // Only the owner's account gets prefilled with the vendor data.
-        state.data = mergeData(DEFAULT_DATA);
-      } else {
-        state.data = blankData();
-      }
+      state.data = (migrated && hasMeaningfulData(migrated)) ? mergeData(migrated) : blankData();
 
       await setDoc(ref, {
         data: state.data,
