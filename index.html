@@ -860,8 +860,9 @@
   function renderChip(svc, c) {
     const isFinished = c.id === 'completed';
     const checkedHex = isFinished ? '#6E7B62' : '#B85C3C';
-    const checkedBg = isFinished ? 'rgba(110, 123, 98, 0.13)' : 'rgba(184, 92, 60, 0.08)';
-    const checkedBorder = isFinished ? 'rgba(110, 123, 98, 0.32)' : 'rgba(184, 92, 60, 0.28)';
+    // Use identical opacity values for both palettes so checked chips look uniformly weighted
+    const checkedBg = isFinished ? 'rgba(110, 123, 98, 0.14)' : 'rgba(184, 92, 60, 0.14)';
+    const checkedBorder = isFinished ? 'rgba(110, 123, 98, 0.45)' : 'rgba(184, 92, 60, 0.45)';
 
     const style = c.isChecked
       ? 'background-color: ' + checkedBg + '; border-color: ' + checkedBorder + '; border-style: solid;'
