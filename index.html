@@ -208,6 +208,50 @@
     } catch (e) { return d; }
   }
   function todayISO() { return new Date().toISOString().slice(0, 10); }
+
+  function formatPhoneInput(value) {
+    const digits = String(value || '').replace(/\D/g, '').slice(0, 10);
+    if (!digits) return '';
+    if (digits.length <= 3) return '(' + digits;
+    if (digits.length <= 6) return '(' + digits.slice(0, 3) + ') ' + digits.slice(3);
+    return '(' + digits.slice(0, 3) + ') ' + digits.slice(3, 6) + '-' + digits.slice(6);
+  }
+
+  async function copyToClipboard(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (e) { /* fall through to fallback */ }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  async function handleCopyPhone(phone, btn) {
+    const ok = await copyToClipboard(phone);
+    if (!ok) return;
+    const iconHolder = btn.querySelector('.copy-icon');
+    if (!iconHolder) return;
+    iconHolder.innerHTML = '<i data-lucide="check" class="w-3 h-3" stroke-width="2.5" style="color: #6E7B62;"></i>';
+    if (window.lucide) window.lucide.createIcons();
+    setTimeout(() => {
+      if (!iconHolder.isConnected) return;
+      iconHolder.innerHTML = '<i data-lucide="copy" class="w-3 h-3" stroke-width="2" style="color: rgba(28,25,23,0.4);"></i>';
+      if (window.lucide) window.lucide.createIcons();
+    }, 1200);
+  }
   function hasMeaningfulData(data) {
     if (!data) return false;
     return PROPERTIES.some(p =>
@@ -724,9 +768,21 @@
 
     let vendorLine;
     if (s.vendor) {
+      let phoneChunk = '';
+      if (s.phone) {
+        phoneChunk = '<span class="ink/30">·</span>'
+          + '<span data-copy-phone="' + esc(s.phone) + '" '
+            + 'class="inline-flex items-center gap-1.5 px-1.5 py-0.5 -mx-0.5 rounded cursor-pointer hover:bg-stone-900/5 transition" '
+            + 'role="button" title="Copy phone number">'
+            + '<span class="font-mono text-xs ink/65">' + esc(s.phone) + '</span>'
+            + '<span class="copy-icon">'
+              + '<i data-lucide="copy" class="w-3 h-3" stroke-width="2" style="color: rgba(28,25,23,0.4);"></i>'
+            + '</span>'
+          + '</span>';
+      }
       vendorLine = '<span class="font-mono text-[10px] tracking-widest uppercase ink/45">Vendor</span>'
         + '<span class="ink/85 font-medium">' + esc(s.vendor) + '</span>'
-        + (s.phone ? '<span class="ink/30">·</span><span class="font-mono text-xs ink/65">' + esc(s.phone) + '</span>' : '');
+        + phoneChunk;
     } else {
       vendorLine = '<span class="italic ink/45">' + esc(svc.blurb) + '</span>';
     }
@@ -957,21 +1013,40 @@
     document.querySelectorAll('[data-field]').forEach(el => {
       const [svcId, field] = el.dataset.field.split(':');
       el.addEventListener('input', () => {
-        const patch = { [field]: el.value };
+        let value = el.value;
+
+        // Auto-format phone numbers as the user types: (XXX) XXX-XXXX
+        if (field === 'phone') {
+          const formatted = formatPhoneInput(value);
+          if (formatted !== value) {
+            el.value = formatted;
+            try { el.setSelectionRange(formatted.length, formatted.length); } catch (e) {}
+            value = formatted;
+          }
+        }
+
+        const patch = { [field]: value };
         // Auto-link date entries to their matching chip:
         //   typing a callDate → mark Called as done
         //   typing a completedDate → mark Finished as done
         //   (scheduled chip is already derived directly from scheduledDate)
         if (field === 'callDate') {
-          patch.callMade = !!el.value;
+          patch.callMade = !!value;
         } else if (field === 'completedDate') {
-          patch.completed = !!el.value;
+          patch.completed = !!value;
         }
         updateService(state.activeProperty, svcId, patch);
         // Re-render after a date change so the chip in the row updates immediately
         if (el.type === 'date') {
           render();
         }
+      });
+    });
+    document.querySelectorAll('[data-copy-phone]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        handleCopyPhone(el.dataset.copyPhone, el);
       });
     });
     document.querySelectorAll('[data-mark-complete]').forEach(el => {
