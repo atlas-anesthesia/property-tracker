@@ -169,7 +169,7 @@
     { id: 'hvac',     name: 'HVAC',     icon: 'wind',    blurb: 'Heating, cooling & ventilation' },
     { id: 'electric', name: 'Electric', icon: 'zap',     blurb: 'Panels, wiring & fixtures' },
     { id: 'plumbing', name: 'Plumbing', icon: 'droplet', blurb: 'Pipes, fixtures & drainage' },
-    { id: 'skirting', name: 'Skirting', icon: 'layers',  blurb: 'Foundation skirting & trim' },
+    { id: 'skirting', name: 'Skirting & Stairs', icon: 'layers',  blurb: 'Foundation skirting & exterior stairs' },
     { id: 'gas',      name: 'Gas',      icon: 'flame',   blurb: 'Lines, meters & connections' }
   ];
 
@@ -187,6 +187,33 @@
     });
     return out;
   }
+
+  // Pre-populated vendor data — seeded into a brand-new account on first sign-in.
+  const DEFAULT_DATA = {
+    townsend: {
+      hvac:     { vendor: 'Schulz Heating & Cooling', phone: '(715) 627-2665', scheduledDate: '2026-01-14', completed: false, completedDate: '', notes: '' },
+      electric: { vendor: '', phone: '', scheduledDate: '', completed: false, completedDate: '', notes: '' },
+      plumbing: { vendor: '', phone: '', scheduledDate: '', completed: false, completedDate: '', notes: '' },
+      skirting: { vendor: '', phone: '', scheduledDate: '', completed: false, completedDate: '', notes: '' },
+      gas:      { vendor: '', phone: '', scheduledDate: '', completed: false, completedDate: '', notes: '' }
+    },
+    kiel: {
+      hvac:     { vendor: "Pieper's Indoor Aire-Care", phone: '(920) 207-3297', scheduledDate: '', completed: false, completedDate: '', notes: 'Gas has to be connected first.' },
+      electric: { vendor: 'Olsen Electric — Mike + Alliant Energy', phone: '(715) 823-6882', scheduledDate: '2026-01-14', completed: false, completedDate: '', notes: 'Temporary until Spring trench. Alternate vendor: Optimum Electric (920) 377-0897.' },
+      plumbing: { vendor: 'Maritime Plumbing', phone: '(920) 682-8794', scheduledDate: '2026-01-14', completed: false, completedDate: '', notes: 'Call back when the electric is ready.' },
+      skirting: { vendor: '', phone: '', scheduledDate: '', completed: false, completedDate: '', notes: '' },
+      gas:      { vendor: 'WPS', phone: '', scheduledDate: '2026-01-13', completed: false, completedDate: '', notes: '' }
+    },
+    marian: {
+      hvac:     { vendor: '', phone: '', scheduledDate: '', completed: false, completedDate: '', notes: 'Gas has to be connected first.' },
+      electric: { vendor: '', phone: '', scheduledDate: '', completed: false, completedDate: '', notes: '' },
+      plumbing: { vendor: 'Scour Plumbing Drain and Sewer', phone: '(715) 460-3337', scheduledDate: '2026-04-22', completed: false, completedDate: '', notes: 'Waiting on HVAC first.' },
+      skirting: { vendor: '', phone: '', scheduledDate: '', completed: false, completedDate: '', notes: '' },
+      gas:      { vendor: 'Alliant Energy', phone: '', scheduledDate: '', completed: false, completedDate: '', notes: 'Alliant is digging for gas and installing in the Spring.' }
+    }
+  };
+
+  const SCHEMA_VERSION = 2;
   function esc(s) {
     if (s == null) return '';
     return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -288,21 +315,36 @@
     const ref = doc(db, 'users', uid);
     try {
       const snap = await getDoc(ref);
-      if (snap.exists() && snap.data().data) {
-        state.data = mergeData(snap.data().data);
-      } else {
-        let migrated = null;
-        try {
-          const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
-          if (raw) migrated = JSON.parse(raw);
-        } catch (e) {}
-        if (migrated && hasMeaningfulData(migrated)) {
-          state.data = mergeData(migrated);
-        } else {
-          state.data = blankData();
-        }
-        await setDoc(ref, { data: state.data, updatedAt: serverTimestamp() });
+      const docData = snap.exists() ? snap.data() : null;
+      const currentVersion = (docData && docData.version) || 0;
+
+      if (currentVersion >= SCHEMA_VERSION) {
+        // Already migrated — just load what's there
+        state.data = mergeData(docData.data || blankData());
+        return;
       }
+
+      // First load on this schema version — run migration once
+      const existingData = docData && docData.data;
+      let migrated = null;
+      try {
+        const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+        if (raw) migrated = JSON.parse(raw);
+      } catch (e) {}
+
+      if (existingData && hasMeaningfulData(existingData)) {
+        state.data = mergeData(existingData);
+      } else if (migrated && hasMeaningfulData(migrated)) {
+        state.data = mergeData(migrated);
+      } else {
+        state.data = mergeData(DEFAULT_DATA);
+      }
+
+      await setDoc(ref, {
+        data: state.data,
+        version: SCHEMA_VERSION,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
     } catch (e) {
       console.error('Could not load user data:', e);
       state.data = blankData();
