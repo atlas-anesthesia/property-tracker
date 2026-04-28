@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>All Day Investments — Pre-Sale Checklist</title>
+<title>Pre-Sale Checklist</title>
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -13,15 +13,11 @@
 <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
 
 <style>
-  body {
-    margin: 0;
-    background-color: #F2EBDD;
-  }
+  body { margin: 0; background-color: #F2EBDD; }
   .font-display { font-family: 'Fraunces', 'Times New Roman', serif; font-optical-sizing: auto; }
   .font-body    { font-family: 'Manrope', system-ui, sans-serif; }
   .font-mono    { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 
-  /* Custom palette */
   .ink { color: #1C1917; }
   .terra { color: #B85C3C; }
   .terra-bg { background-color: #B85C3C; }
@@ -29,7 +25,6 @@
   .sage-bg { background-color: #6E7B62; }
   .rule { border-color: #1C1917; }
 
-  /* Ink with opacity (slashes escaped for CSS) */
   .ink\/10 { color: rgba(28, 25, 23, 0.10); }
   .ink\/15 { color: rgba(28, 25, 23, 0.15); }
   .ink\/30 { color: rgba(28, 25, 23, 0.30); }
@@ -77,10 +72,7 @@
     box-sizing: border-box;
   }
   .field-input:focus { border-bottom-color: #B85C3C; }
-  .field-input::placeholder {
-    color: rgba(28, 25, 23, 0.35);
-    font-style: italic;
-  }
+  .field-input::placeholder { color: rgba(28, 25, 23, 0.35); font-style: italic; }
   .field-input.mono { font-family: 'JetBrains Mono', monospace; }
   textarea.field-input { resize: none; }
 
@@ -104,17 +96,69 @@
     color: #F2EBDD;
   }
 
+  .auth-btn-primary {
+    background-color: #B85C3C;
+    color: #F2EBDD;
+    transition: opacity 0.2s ease;
+  }
+  .auth-btn-primary:hover { opacity: 0.9; }
+  .auth-btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
   .pre-init { padding: 2rem; font-family: 'Manrope', system-ui, sans-serif; color: #6E7B62; }
+
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
 <div id="app" class="pre-init">Loading…</div>
 
-<script>
-(function () {
-  'use strict';
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js';
+  import {
+    getAuth,
+    onAuthStateChanged,
+    signInWithEmailAndPassword,
+    createUserWithEmailAndPassword,
+    sendPasswordResetEmail,
+    signOut
+  } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-auth.js';
+  import {
+    getFirestore,
+    doc,
+    getDoc,
+    setDoc,
+    onSnapshot,
+    serverTimestamp
+  } from 'https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore.js';
 
-  // ============ CONSTANTS ============
+  // =============================================================
+  // FIREBASE CONFIG — REPLACE THE VALUES BELOW WITH YOUR OWN
+  //
+  // Get them from: Firebase Console → Project Settings → Your apps
+  // (See setup instructions Claude gave you in chat.)
+  // =============================================================
+  const firebaseConfig = {
+    apiKey: "AIzaSyCC37W1KdRRH-c8wKo8wK1PG_0UqOmddeE",
+    authDomain: "presale-checklist.firebaseapp.com",
+    projectId: "presale-checklist",
+    storageBucket: "presale-checklist.firebasestorage.app",
+    messagingSenderId: "161337264430",
+    appId: "1:161337264430:web:d0c34101eb147e9a1112bf"
+  };
+  // =============================================================
+
+  const PLACEHOLDER_API_KEY = "PASTE_YOUR_API_KEY_HERE";
+  const configMissing = !firebaseConfig.apiKey || firebaseConfig.apiKey === PLACEHOLDER_API_KEY;
+
+  let app, auth, db;
+  if (!configMissing) {
+    app = initializeApp(firebaseConfig);
+    auth = getAuth(app);
+    db = getFirestore(app);
+  }
+
+  // ============ APP CONSTANTS ============
   const PROPERTIES = [
     { id: 'townsend', name: 'Townsend', tag: 'I' },
     { id: 'kiel',     name: 'Kiel',     tag: 'II' },
@@ -129,7 +173,7 @@
     { id: 'gas',      name: 'Gas',      icon: 'flame',   blurb: 'Lines, meters & connections' }
   ];
 
-  const STORAGE_KEY = 'all-day-investments-tracker-v1';
+  const LEGACY_STORAGE_KEY = 'all-day-investments-tracker-v1';
 
   // ============ HELPERS ============
   function emptyService() {
@@ -137,16 +181,15 @@
   }
   function blankData() {
     const out = {};
-    PROPERTIES.forEach(function (p) {
+    PROPERTIES.forEach(p => {
       out[p.id] = {};
-      SERVICES.forEach(function (s) { out[p.id][s.id] = emptyService(); });
+      SERVICES.forEach(s => { out[p.id][s.id] = emptyService(); });
     });
     return out;
   }
   function esc(s) {
     if (s == null) return '';
-    return String(s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
   function formatDate(d) {
@@ -157,9 +200,37 @@
     } catch (e) { return d; }
   }
   function todayISO() { return new Date().toISOString().slice(0, 10); }
+  function hasMeaningfulData(data) {
+    if (!data) return false;
+    return PROPERTIES.some(p =>
+      SERVICES.some(s => {
+        const sv = (data[p.id] && data[p.id][s.id]) || {};
+        return sv.vendor || sv.phone || sv.scheduledDate || sv.completed || sv.completedDate || sv.notes;
+      })
+    );
+  }
+  function mergeData(remote) {
+    const merged = blankData();
+    if (!remote) return merged;
+    Object.keys(remote).forEach(pid => {
+      if (!merged[pid]) return;
+      Object.keys(remote[pid] || {}).forEach(sid => {
+        if (merged[pid][sid]) {
+          merged[pid][sid] = Object.assign({}, merged[pid][sid], remote[pid][sid]);
+        }
+      });
+    });
+    return merged;
+  }
 
   // ============ STATE ============
   let state = {
+    authLoading: true,
+    authUser: null,
+    authMode: 'signin',
+    authError: null,
+    authBusy: false,
+    resetSent: false,
     activeProperty: 'townsend',
     expanded: null,
     data: blankData(),
@@ -168,33 +239,107 @@
   };
   let saveTimer = null;
   let lastSaveLabel = null;
+  let firestoreUnsub = null;
 
-  function load() {
+  // ============ AUTH ============
+  function mapAuthError(code) {
+    const map = {
+      'auth/invalid-email': 'That email address looks invalid.',
+      'auth/user-not-found': 'No account found for that email.',
+      'auth/wrong-password': 'Incorrect password.',
+      'auth/invalid-credential': 'Email or password is incorrect.',
+      'auth/email-already-in-use': 'An account already exists for that email.',
+      'auth/weak-password': 'Password must be at least 6 characters.',
+      'auth/network-request-failed': 'Network problem — check your connection.',
+      'auth/too-many-requests': 'Too many attempts. Try again in a few minutes.',
+      'auth/missing-password': 'Please enter a password.',
+      'auth/operation-not-allowed': 'Email sign-in is not enabled in Firebase.',
+      'auth/unauthorized-domain': 'This domain is not authorized in Firebase.'
+    };
+    return map[code] || 'Something went wrong. Please try again.';
+  }
+
+  async function handleSignIn(email, password) {
+    state.authBusy = true; state.authError = null; render();
+    try { await signInWithEmailAndPassword(auth, email, password); }
+    catch (e) { state.authError = mapAuthError(e.code); }
+    state.authBusy = false; render();
+  }
+  async function handleSignUp(email, password) {
+    state.authBusy = true; state.authError = null; render();
+    try { await createUserWithEmailAndPassword(auth, email, password); }
+    catch (e) { state.authError = mapAuthError(e.code); }
+    state.authBusy = false; render();
+  }
+  async function handlePasswordReset(email) {
+    state.authBusy = true; state.authError = null; state.resetSent = false; render();
+    try { await sendPasswordResetEmail(auth, email); state.resetSent = true; }
+    catch (e) { state.authError = mapAuthError(e.code); }
+    state.authBusy = false; render();
+  }
+  async function handleSignOut() {
+    if (firestoreUnsub) { firestoreUnsub(); firestoreUnsub = null; }
+    if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
+    try { await signOut(auth); } catch (e) { console.error(e); }
+  }
+
+  // ============ FIRESTORE SYNC ============
+  async function loadUserData(uid) {
+    const ref = doc(db, 'users', uid);
     try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw);
-      const merged = blankData();
-      Object.keys(parsed).forEach(function (pid) {
-        if (!merged[pid]) return;
-        Object.keys(parsed[pid] || {}).forEach(function (sid) {
-          if (merged[pid][sid]) {
-            merged[pid][sid] = Object.assign({}, merged[pid][sid], parsed[pid][sid]);
-          }
-        });
-      });
-      state.data = merged;
+      const snap = await getDoc(ref);
+      if (snap.exists() && snap.data().data) {
+        state.data = mergeData(snap.data().data);
+      } else {
+        let migrated = null;
+        try {
+          const raw = localStorage.getItem(LEGACY_STORAGE_KEY);
+          if (raw) migrated = JSON.parse(raw);
+        } catch (e) {}
+        if (migrated && hasMeaningfulData(migrated)) {
+          state.data = mergeData(migrated);
+        } else {
+          state.data = blankData();
+        }
+        await setDoc(ref, { data: state.data, updatedAt: serverTimestamp() });
+      }
     } catch (e) {
-      console.warn('Could not load saved data:', e);
+      console.error('Could not load user data:', e);
+      state.data = blankData();
     }
   }
+
+  function setupRealtimeSync(uid) {
+    const ref = doc(db, 'users', uid);
+    firestoreUnsub = onSnapshot(ref, (snap) => {
+      if (snap.metadata.hasPendingWrites) return;
+      const active = document.activeElement;
+      if (active && active.dataset && active.dataset.field) return;
+      if (!snap.exists()) return;
+      const remote = snap.data().data;
+      if (!remote) return;
+      const remoteJson = JSON.stringify(remote);
+      const localJson = JSON.stringify(state.data);
+      if (remoteJson !== localJson) {
+        state.data = mergeData(remote);
+        render();
+      }
+    }, (error) => {
+      console.error('Sync listener error:', error);
+    });
+  }
+
   function scheduleSave() {
     if (saveTimer) clearTimeout(saveTimer);
     state.saving = true;
     updateSaveIndicator();
-    saveTimer = setTimeout(function () {
+    saveTimer = setTimeout(async () => {
+      if (!state.authUser) {
+        state.saving = false; updateSaveIndicator(); return;
+      }
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(state.data));
+        const ref = doc(db, 'users', state.authUser.uid);
+        await setDoc(ref, { data: state.data, updatedAt: serverTimestamp() }, { merge: true });
         state.savedAt = new Date();
       } catch (e) {
         console.error('Save failed:', e);
@@ -204,7 +349,7 @@
     }, 700);
   }
 
-  // ============ ACTIONS ============
+  // ============ APP ACTIONS ============
   function updateService(propId, svcId, patch) {
     state.data[propId][svcId] = Object.assign({}, state.data[propId][svcId], patch);
     scheduleSave();
@@ -213,85 +358,199 @@
     const current = state.data[propId][svcId];
     const nowComplete = !current.completed;
     const completedDate = nowComplete && !current.completedDate ? todayISO() : current.completedDate;
-    updateService(propId, svcId, { completed: nowComplete, completedDate: completedDate });
+    updateService(propId, svcId, { completed: nowComplete, completedDate });
     render();
   }
-  function switchProperty(id) {
-    state.activeProperty = id;
-    state.expanded = null;
-    render();
-  }
-  function toggleExpand(svcId) {
-    state.expanded = state.expanded === svcId ? null : svcId;
-    render();
-  }
+  function switchProperty(id) { state.activeProperty = id; state.expanded = null; render(); }
+  function toggleExpand(svcId) { state.expanded = state.expanded === svcId ? null : svcId; render(); }
 
   // ============ RENDERING ============
   function render() {
     const app = document.getElementById('app');
     app.classList.remove('pre-init');
-    app.innerHTML = renderApp();
-    bindEvents();
+    if (configMissing) {
+      app.innerHTML = renderSetup();
+    } else if (state.authLoading) {
+      app.innerHTML = renderAuthLoading();
+    } else if (!state.authUser) {
+      app.innerHTML = renderLogin();
+      bindLoginEvents();
+    } else {
+      app.innerHTML = renderMainApp();
+      bindAppEvents();
+      lastSaveLabel = null;
+      updateSaveIndicator();
+    }
     if (window.lucide) window.lucide.createIcons();
-    lastSaveLabel = null; // reset so the indicator re-applies after innerHTML wipe
-    updateSaveIndicator();
   }
 
-  function renderApp() {
-    const propData = state.data[state.activeProperty];
-    const completed = SERVICES.filter(function (s) { return propData[s.id].completed; }).length;
-    const progress = Math.round((completed / SERVICES.length) * 100);
-    const propName = PROPERTIES.find(function (p) { return p.id === state.activeProperty; }).name;
+  function spinnerSvg(classes) {
+    return '<svg class="' + classes + ' spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">'
+      + '<path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v3m0 9v3m5.25-12l-2.1 2.1m-6.3 6.3L6.75 17.25M19.5 12h-3m-9 0h-3m12.75 5.25l-2.1-2.1m-6.3-6.3L6.75 6.75"/>'
+      + '</svg>';
+  }
 
-    return ''
-      + '<div class="min-h-screen w-full font-body text-stone-900 relative overflow-x-hidden">'
-        + '<div class="paper-bg grain min-h-screen relative">'
-          + '<div class="relative z-10 max-w-5xl mx-auto px-6 sm:px-10 py-10 sm:py-14">'
-            + renderHeader()
-            + renderTabs()
-            + renderPropertyMeter(propName, progress, completed)
-            + renderRows()
-            + renderFooter()
-          + '</div>'
+  function renderSetup() {
+    return '<div class="paper-bg grain min-h-screen relative">'
+      + '<div class="relative z-10 max-w-2xl mx-auto px-6 py-16 sm:py-24">'
+        + '<div class="font-mono text-[11px] tracking-[0.3em] uppercase ink/60 mb-4">All Day Investments</div>'
+        + '<h1 class="font-display text-4xl sm:text-5xl ink mb-3">Setup needed</h1>'
+        + '<p class="text-stone-700 leading-relaxed mb-6">Before you can sign in, this file needs your Firebase configuration. Open the HTML in a text editor and look for the section labelled <span class="font-mono terra">FIREBASE CONFIG</span> near the top of the script. Step-by-step instructions are in your last chat with Claude.</p>'
+        + '<div class="bg-[#FAF6EC] border border-stone-900/10 rounded-sm p-5 font-mono text-xs ink/70 leading-relaxed">'
+          + 'You will paste six values: <span class="terra">apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId</span>.'
         + '</div>'
+      + '</div>'
+    + '</div>';
+  }
+
+  function renderAuthLoading() {
+    return '<div class="paper-bg grain min-h-screen relative flex items-center justify-center">'
+      + '<div class="relative z-10 text-center">'
+        + spinnerSvg('w-5 h-5 sage mx-auto mb-3')
+        + '<div class="font-mono text-[11px] tracking-[0.3em] uppercase ink/60">Loading</div>'
+      + '</div>'
+    + '</div>';
+  }
+
+  function renderLogin() {
+    const mode = state.authMode || 'signin';
+    const titleMap = { signin: 'Sign in', signup: 'Create account', reset: 'Reset password' };
+    const blurbMap = {
+      signin: 'Welcome back. Your dossier awaits.',
+      signup: 'Your data will sync across all your devices.',
+      reset: 'Enter your email to receive a reset link.'
+    };
+    const submitMap = { signin: 'Sign in', signup: 'Create account', reset: 'Send reset link' };
+
+    let errorBox = '';
+    if (state.authError) {
+      errorBox = '<div class="mb-4 px-3 py-2 rounded-sm" style="background-color: rgba(184, 92, 60, 0.1);">'
+        + '<span class="font-mono text-[11px] tracking-wider terra">' + esc(state.authError) + '</span>'
       + '</div>';
+    }
+    let successBox = '';
+    if (state.resetSent) {
+      successBox = '<div class="mb-4 px-3 py-2 rounded-sm" style="background-color: rgba(110, 123, 98, 0.13);">'
+        + '<span class="font-mono text-[11px] tracking-wider sage">Reset link sent. Check your email.</span>'
+      + '</div>';
+    }
+
+    let passwordField = '';
+    if (mode !== 'reset') {
+      const hint = mode === 'signup' ? '<div class="text-xs ink/45 mt-1 italic">at least 6 characters</div>' : '';
+      const autocomp = mode === 'signup' ? 'new-password' : 'current-password';
+      passwordField = '<div class="mb-5">'
+        + '<label class="font-mono text-[10px] tracking-[0.2em] uppercase ink/60 mb-1 block">Password</label>'
+        + '<input type="password" id="auth-password" class="field-input" required autocomplete="' + autocomp + '" minlength="6" />'
+        + hint
+      + '</div>';
+    }
+
+    let footerLinks = '';
+    if (mode === 'signin') {
+      footerLinks = '<button type="button" data-mode="signup" class="text-left ink/65 hover:terra transition-colors text-xs">New here? <span class="terra">Create an account →</span></button>'
+        + '<button type="button" data-mode="reset" class="text-left ink/65 hover:terra transition-colors text-xs">Forgot your password?</button>';
+    } else if (mode === 'signup') {
+      footerLinks = '<button type="button" data-mode="signin" class="text-left ink/65 hover:terra transition-colors text-xs">Already have an account? <span class="terra">Sign in →</span></button>';
+    } else {
+      footerLinks = '<button type="button" data-mode="signin" class="text-left ink/65 hover:terra transition-colors text-xs">← Back to sign in</button>';
+    }
+
+    const submitContent = state.authBusy
+      ? spinnerSvg('w-4 h-4 inline-block mr-2 align-text-bottom') + 'Working…'
+      : submitMap[mode];
+
+    return '<div class="paper-bg grain min-h-screen relative">'
+      + '<div class="relative z-10 max-w-md mx-auto px-6 py-12 sm:py-20">'
+        + '<header class="mb-10 text-center">'
+          + '<div class="font-mono text-[11px] tracking-[0.3em] uppercase ink/60 mb-4">All Day Investments</div>'
+          + '<h1 class="font-display text-4xl sm:text-5xl ink leading-[0.95]">'
+            + '<span class="italic font-light">Pre-Sale</span> '
+            + '<span class="underline-hand">Checklist</span>'
+          + '</h1>'
+        + '</header>'
+        + '<div class="bg-[#FAF6EC] border border-stone-900/10 rounded-sm card-shadow p-7 sm:p-9">'
+          + '<h2 class="font-display text-2xl ink mb-1">' + titleMap[mode] + '</h2>'
+          + '<p class="text-sm ink/60 mb-6">' + blurbMap[mode] + '</p>'
+          + '<form id="auth-form" autocomplete="on">'
+            + '<div class="mb-5">'
+              + '<label class="font-mono text-[10px] tracking-[0.2em] uppercase ink/60 mb-1 block">Email</label>'
+              + '<input type="email" id="auth-email" class="field-input mono" required autocomplete="email" />'
+            + '</div>'
+            + passwordField
+            + errorBox
+            + successBox
+            + '<button type="submit" id="auth-submit" class="auth-btn-primary w-full px-4 py-3 rounded-sm font-mono text-[11px] tracking-[0.2em] uppercase"' + (state.authBusy ? ' disabled' : '') + '>'
+              + submitContent
+            + '</button>'
+          + '</form>'
+          + '<div class="mt-6 pt-5 border-t border-stone-900/10 flex flex-col gap-2">' + footerLinks + '</div>'
+        + '</div>'
+        + '<div class="text-center mt-8 font-mono text-[10px] tracking-[0.2em] uppercase ink/45">Synced across your devices</div>'
+      + '</div>'
+    + '</div>';
+  }
+
+  function renderMainApp() {
+    const propData = state.data[state.activeProperty];
+    const completed = SERVICES.filter(s => propData[s.id].completed).length;
+    const progress = Math.round((completed / SERVICES.length) * 100);
+    const propName = PROPERTIES.find(p => p.id === state.activeProperty).name;
+
+    return '<div class="min-h-screen w-full font-body text-stone-900 relative overflow-x-hidden">'
+      + '<div class="paper-bg grain min-h-screen relative">'
+        + '<div class="relative z-10 max-w-5xl mx-auto px-6 sm:px-10 py-10 sm:py-14">'
+          + renderHeader()
+          + renderTabs()
+          + renderPropertyMeter(propName, progress, completed)
+          + renderRows()
+          + renderFooter()
+        + '</div>'
+      + '</div>'
+    + '</div>';
   }
 
   function renderHeader() {
-    return ''
-      + '<header class="mb-6 sm:mb-8">'
-        + '<div class="flex items-baseline justify-between flex-wrap gap-3">'
-          + '<div class="flex items-center gap-3">'
-            + '<div class="w-9 h-9 rounded-full border rule flex items-center justify-center">'
-              + '<i data-lucide="building-2" class="w-4 h-4 ink" stroke-width="1.5"></i>'
-            + '</div>'
-            + '<div class="font-mono text-[11px] tracking-[0.3em] uppercase ink/70">All Day Investments</div>'
+    const userEmail = state.authUser ? state.authUser.email : '';
+    return '<header class="mb-6 sm:mb-8">'
+      + '<div class="flex items-baseline justify-between flex-wrap gap-3">'
+        + '<div class="flex items-center gap-3">'
+          + '<div class="w-9 h-9 rounded-full border rule flex items-center justify-center">'
+            + '<i data-lucide="building-2" class="w-4 h-4 ink" stroke-width="1.5"></i>'
           + '</div>'
-          + '<div id="save-indicator" class="flex items-center gap-2 font-mono text-[11px] tracking-wider uppercase">'
+          + '<div class="font-mono text-[11px] tracking-[0.3em] uppercase ink/70">All Day Investments</div>'
+        + '</div>'
+        + '<div class="flex items-center gap-3 flex-wrap font-mono text-[11px] tracking-wider uppercase">'
+          + '<span class="ink/60 normal-case tracking-normal">' + esc(userEmail) + '</span>'
+          + '<span class="ink/30">·</span>'
+          + '<span id="save-indicator" class="flex items-center gap-2">'
             + '<i data-lucide="check-circle-2" class="w-3 h-3 sage" stroke-width="2"></i>'
-            + '<span class="sage">All changes saved</span>'
-          + '</div>'
+            + '<span class="sage">Synced</span>'
+          + '</span>'
+          + '<span class="ink/30">·</span>'
+          + '<button id="logout-btn" class="ink/60 hover:terra transition-colors uppercase tracking-wider">Sign out</button>'
         + '</div>'
-        + '<div class="border-t rule mt-4 mb-6"></div>'
-        + '<div class="flex items-end justify-between flex-wrap gap-6">'
-          + '<div>'
-            + '<h1 class="font-display text-4xl sm:text-5xl md:text-6xl lg:text-7xl leading-[0.95] ink tracking-tight">'
-              + '<span class="italic font-light">Pre-Sale</span> '
-              + '<span class="underline-hand">Checklist</span>'
-            + '</h1>'
-            + '<p class="mt-4 font-body text-stone-700 leading-relaxed">'
-              + 'A working dossier for vendors, schedules, and completions across three properties prepared for sale or rental.'
-            + '</p>'
-          + '</div>'
+      + '</div>'
+      + '<div class="border-t rule mt-4 mb-6"></div>'
+      + '<div class="flex items-end justify-between flex-wrap gap-6">'
+        + '<div>'
+          + '<h1 class="font-display text-4xl sm:text-5xl md:text-6xl lg:text-7xl leading-[0.95] ink tracking-tight">'
+            + '<span class="italic font-light">Pre-Sale</span> '
+            + '<span class="underline-hand">Checklist</span>'
+          + '</h1>'
+          + '<p class="mt-4 font-body text-stone-700 leading-relaxed">'
+            + 'A working dossier for vendors, schedules, and completions across three properties prepared for sale or rental.'
+          + '</p>'
         + '</div>'
-      + '</header>';
+      + '</div>'
+    + '</header>';
   }
 
   function renderTabs() {
-    const tabs = PROPERTIES.map(function (p) {
+    const tabs = PROPERTIES.map(p => {
       const isActive = p.id === state.activeProperty;
       const propData = state.data[p.id];
-      const done = SERVICES.filter(function (s) { return propData[s.id].completed; }).length;
+      const done = SERVICES.filter(s => propData[s.id].completed).length;
       const buttonClasses = 'tab-btn ' + (isActive ? 'active ' : '')
         + 'flex items-center gap-3 px-4 sm:px-5 py-3 rounded-sm flex-1 sm:flex-none '
         + (isActive ? 'bg-stone-900 text-stone-50' : 'hover:bg-stone-900/5 ink');
@@ -333,8 +592,9 @@
   }
 
   function renderRows() {
-    const rows = SERVICES.map(function (svc, idx) { return renderRow(svc, idx); }).join('');
-    return '<div class="space-y-3 mb-8">' + rows + '</div>';
+    return '<div class="space-y-3 mb-8">'
+      + SERVICES.map((svc, idx) => renderRow(svc, idx)).join('')
+    + '</div>';
   }
 
   function renderRow(svc, idx) {
@@ -368,9 +628,7 @@
     if (s.vendor) {
       vendorLine = '<span class="font-mono text-[10px] tracking-widest uppercase ink/45">Vendor</span>'
         + '<span class="ink/85 font-medium">' + esc(s.vendor) + '</span>'
-        + (s.phone
-          ? '<span class="ink/30">·</span><span class="font-mono text-xs ink/65">' + esc(s.phone) + '</span>'
-          : '');
+        + (s.phone ? '<span class="ink/30">·</span><span class="font-mono text-xs ink/65">' + esc(s.phone) + '</span>' : '');
     } else {
       vendorLine = '<span class="italic ink/45">' + esc(svc.blurb) + '</span>';
     }
@@ -379,57 +637,49 @@
       ? (s.completedDate ? esc(formatDate(s.completedDate)) : 'done')
       : 'pending';
     const scheduledDisplay = s.scheduledDate ? esc(formatDate(s.scheduledDate)) : 'not set';
-
     const chevronClass = 'w-5 h-5 ink/50 flex-shrink-0 mt-3 transition-transform ' + (isOpen ? 'rotate-180' : '');
 
-    return ''
-      + '<article class="bg-[#FAF6EC] border border-stone-900/10 rounded-sm card-shadow transition-all ' + (s.completed ? 'opacity-90' : '') + '">'
-        + '<div class="flex items-stretch">'
-          // Status checkbox
-          + '<button data-toggle-complete="' + esc(svc.id) + '" '
-              + 'class="flex-shrink-0 px-5 sm:px-6 flex items-center justify-center border-r border-stone-900/10 hover:bg-stone-900/5 transition-colors" '
-              + 'aria-label="' + (s.completed ? 'Mark incomplete' : 'Mark complete') + '">'
-            + checkboxInner
-          + '</button>'
-          // Main row content
-          + '<button data-expand="' + esc(svc.id) + '" '
-              + 'class="flex-1 flex items-start gap-4 sm:gap-5 px-5 sm:px-6 py-5 text-left hover:bg-stone-900/[0.02] transition-colors">'
-            + '<div class="flex-shrink-0 w-11 h-11 rounded-sm border border-stone-900/15 flex items-center justify-center mt-0.5">'
-              + '<i data-lucide="' + esc(svc.icon) + '" class="w-5 h-5 ink" stroke-width="1.5"></i>'
+    return '<article class="bg-[#FAF6EC] border border-stone-900/10 rounded-sm card-shadow transition-all ' + (s.completed ? 'opacity-90' : '') + '">'
+      + '<div class="flex items-stretch">'
+        + '<button data-toggle-complete="' + esc(svc.id) + '" '
+            + 'class="flex-shrink-0 px-5 sm:px-6 flex items-center justify-center border-r border-stone-900/10 hover:bg-stone-900/5 transition-colors" '
+            + 'aria-label="' + (s.completed ? 'Mark incomplete' : 'Mark complete') + '">'
+          + checkboxInner
+        + '</button>'
+        + '<button data-expand="' + esc(svc.id) + '" '
+            + 'class="flex-1 flex items-start gap-4 sm:gap-5 px-5 sm:px-6 py-5 text-left hover:bg-stone-900/[0.02] transition-colors">'
+          + '<div class="flex-shrink-0 w-11 h-11 rounded-sm border border-stone-900/15 flex items-center justify-center mt-0.5">'
+            + '<i data-lucide="' + esc(svc.icon) + '" class="w-5 h-5 ink" stroke-width="1.5"></i>'
+          + '</div>'
+          + '<div class="min-w-0 flex-1">'
+            + '<div class="flex items-baseline gap-2 flex-wrap">'
+              + '<h3 class="' + titleClass + '">' + esc(svc.name) + '</h3>'
+              + '<span class="font-mono text-[10px] tracking-widest uppercase ink/40">· 0' + (idx + 1) + '</span>'
             + '</div>'
-            + '<div class="min-w-0 flex-1">'
-              + '<div class="flex items-baseline gap-2 flex-wrap">'
-                + '<h3 class="' + titleClass + '">' + esc(svc.name) + '</h3>'
-                + '<span class="font-mono text-[10px] tracking-widest uppercase ink/40">· 0' + (idx + 1) + '</span>'
+            + '<div class="mt-1 mb-3 text-sm flex items-center gap-2 flex-wrap">' + vendorLine + '</div>'
+            + '<div class="flex flex-wrap gap-2">'
+              + '<div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-sm border" style="' + scheduledStyle + '">'
+                + '<i data-lucide="calendar" class="w-3.5 h-3.5" stroke-width="2" style="color: ' + scheduledIconColor + ';"></i>'
+                + '<span class="font-mono text-[10px] tracking-[0.18em] uppercase ink/55">Scheduled</span>'
+                + '<span class="' + scheduledTextClass + '" style="' + scheduledTextStyle + '">' + scheduledDisplay + '</span>'
               + '</div>'
-              + '<div class="mt-1 mb-3 text-sm flex items-center gap-2 flex-wrap">' + vendorLine + '</div>'
-              + '<div class="flex flex-wrap gap-2">'
-                // Scheduled pill
-                + '<div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-sm border" style="' + scheduledStyle + '">'
-                  + '<i data-lucide="calendar" class="w-3.5 h-3.5" stroke-width="2" style="color: ' + scheduledIconColor + ';"></i>'
-                  + '<span class="font-mono text-[10px] tracking-[0.18em] uppercase ink/55">Scheduled</span>'
-                  + '<span class="' + scheduledTextClass + '" style="' + scheduledTextStyle + '">' + scheduledDisplay + '</span>'
-                + '</div>'
-                // Completed pill
-                + '<div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-sm border" style="' + completedStyle + '">'
-                  + '<i data-lucide="check-circle-2" class="w-3.5 h-3.5" stroke-width="2" style="color: ' + completedIconColor + ';"></i>'
-                  + '<span class="font-mono text-[10px] tracking-[0.18em] uppercase ink/55">Completed</span>'
-                  + '<span class="font-mono text-[12px] font-medium" style="' + completedTextStyle + '">' + completedDisplay + '</span>'
-                + '</div>'
+              + '<div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-sm border" style="' + completedStyle + '">'
+                + '<i data-lucide="check-circle-2" class="w-3.5 h-3.5" stroke-width="2" style="color: ' + completedIconColor + ';"></i>'
+                + '<span class="font-mono text-[10px] tracking-[0.18em] uppercase ink/55">Completed</span>'
+                + '<span class="font-mono text-[12px] font-medium" style="' + completedTextStyle + '">' + completedDisplay + '</span>'
               + '</div>'
             + '</div>'
-            + '<i data-lucide="chevron-down" class="' + chevronClass + '" stroke-width="1.5"></i>'
-          + '</button>'
-        + '</div>'
-        + (isOpen ? renderExpandedForm(svc, s) : '')
-      + '</article>';
+          + '</div>'
+          + '<i data-lucide="chevron-down" class="' + chevronClass + '" stroke-width="1.5"></i>'
+        + '</button>'
+      + '</div>'
+      + (isOpen ? renderExpandedForm(svc, s) : '')
+    + '</article>';
   }
 
   function renderExpandedForm(svc, s) {
     const statusBtnClass = 'px-4 py-2 rounded-sm font-mono text-[11px] tracking-widest uppercase transition-all '
-      + (s.completed
-          ? 'border border-stone-900/20 ink hover:bg-stone-900/5'
-          : 'sage-bg text-stone-50 hover:opacity-90');
+      + (s.completed ? 'border border-stone-900/20 ink hover:bg-stone-900/5' : 'sage-bg text-stone-50 hover:opacity-90');
 
     return '<div class="border-t border-stone-900/10 px-5 sm:px-12 py-7" style="background-color: rgba(245, 239, 224, 0.4);">'
       + '<div class="grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-6">'
@@ -437,36 +687,31 @@
           + '<label class="flex items-center gap-2 font-mono text-[10px] tracking-[0.2em] uppercase ink/60 mb-1">'
             + '<i data-lucide="user" class="w-3 h-3" stroke-width="2"></i> Vendor / Contact Name'
           + '</label>'
-          + '<input type="text" class="field-input" data-field="' + esc(svc.id) + ':vendor" '
-            + 'value="' + esc(s.vendor) + '" placeholder="e.g. Riverside HVAC Co." />'
+          + '<input type="text" class="field-input" data-field="' + esc(svc.id) + ':vendor" value="' + esc(s.vendor) + '" placeholder="e.g. Riverside HVAC Co." />'
         + '</div>'
         + '<div>'
           + '<label class="flex items-center gap-2 font-mono text-[10px] tracking-[0.2em] uppercase ink/60 mb-1">'
             + '<i data-lucide="phone" class="w-3 h-3" stroke-width="2"></i> Phone Number'
           + '</label>'
-          + '<input type="tel" class="field-input mono" data-field="' + esc(svc.id) + ':phone" '
-            + 'value="' + esc(s.phone) + '" placeholder="(555) 123-4567" />'
+          + '<input type="tel" class="field-input mono" data-field="' + esc(svc.id) + ':phone" value="' + esc(s.phone) + '" placeholder="(555) 123-4567" />'
         + '</div>'
         + '<div>'
           + '<label class="flex items-center gap-2 font-mono text-[10px] tracking-[0.2em] uppercase ink/60 mb-1">'
             + '<i data-lucide="calendar" class="w-3 h-3" stroke-width="2"></i> Scheduled Service Date'
           + '</label>'
-          + '<input type="date" class="field-input mono" data-field="' + esc(svc.id) + ':scheduledDate" '
-            + 'value="' + esc(s.scheduledDate) + '" />'
+          + '<input type="date" class="field-input mono" data-field="' + esc(svc.id) + ':scheduledDate" value="' + esc(s.scheduledDate) + '" />'
         + '</div>'
         + '<div>'
           + '<label class="flex items-center gap-2 font-mono text-[10px] tracking-[0.2em] uppercase ink/60 mb-1">'
             + '<i data-lucide="check-circle-2" class="w-3 h-3" stroke-width="2"></i> Completion Date'
           + '</label>'
-          + '<input type="date" class="field-input mono" data-field="' + esc(svc.id) + ':completedDate" '
-            + 'value="' + esc(s.completedDate) + '" />'
+          + '<input type="date" class="field-input mono" data-field="' + esc(svc.id) + ':completedDate" value="' + esc(s.completedDate) + '" />'
         + '</div>'
         + '<div class="md:col-span-2">'
           + '<label class="flex items-center gap-2 font-mono text-[10px] tracking-[0.2em] uppercase ink/60 mb-1">'
             + '<i data-lucide="file-text" class="w-3 h-3" stroke-width="2"></i> Notes'
           + '</label>'
-          + '<textarea class="field-input" rows="2" data-field="' + esc(svc.id) + ':notes" '
-            + 'placeholder="Quote amount, parts ordered, follow-up reminders…">' + esc(s.notes) + '</textarea>'
+          + '<textarea class="field-input" rows="2" data-field="' + esc(svc.id) + ':notes" placeholder="Quote amount, parts ordered, follow-up reminders…">' + esc(s.notes) + '</textarea>'
         + '</div>'
       + '</div>'
       + '<div class="mt-7 pt-5 border-t border-stone-900/10 flex items-center justify-between flex-wrap gap-3">'
@@ -496,21 +741,20 @@
     let label;
     if (state.saving) label = 'saving';
     else if (state.savedAt) label = 'saved-' + state.savedAt.getTime();
-    else label = 'init';
+    else label = 'synced';
     if (label === lastSaveLabel) return;
     lastSaveLabel = label;
 
     if (state.saving) {
-      el.innerHTML = '<svg class="w-3 h-3 sage animate-spin" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v3m0 9v3m5.25-12l-2.1 2.1m-6.3 6.3L6.75 17.25M19.5 12h-3m-9 0h-3m12.75 5.25l-2.1-2.1m-6.3-6.3L6.75 6.75"/></svg>'
-        + '<span class="sage">Saving…</span>';
+      el.innerHTML = spinnerSvg('w-3 h-3 sage') + '<span class="sage">Syncing…</span>';
     } else if (state.savedAt) {
       const time = state.savedAt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
       el.innerHTML = '<i data-lucide="check-circle-2" class="w-3 h-3 sage" stroke-width="2"></i>'
-        + '<span class="sage">Saved ' + esc(time) + '</span>';
+        + '<span class="sage">Synced ' + esc(time) + '</span>';
       if (window.lucide) window.lucide.createIcons();
     } else {
       el.innerHTML = '<i data-lucide="check-circle-2" class="w-3 h-3 sage" stroke-width="2"></i>'
-        + '<span class="sage">All changes saved</span>';
+        + '<span class="sage">Synced</span>';
       if (window.lucide) window.lucide.createIcons();
     }
   }
@@ -532,49 +776,84 @@
     }
   }
 
-  // ============ EVENTS ============
-  function bindEvents() {
-    document.querySelectorAll('[data-tab]').forEach(function (el) {
-      el.addEventListener('click', function () { switchProperty(el.dataset.tab); });
+  // ============ EVENT BINDING ============
+  function bindLoginEvents() {
+    const form = document.getElementById('auth-form');
+    if (form) {
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        if (state.authBusy) return;
+        const email = document.getElementById('auth-email').value.trim();
+        const passwordEl = document.getElementById('auth-password');
+        const password = passwordEl ? passwordEl.value : '';
+        const mode = state.authMode || 'signin';
+        if (mode === 'signin') await handleSignIn(email, password);
+        else if (mode === 'signup') await handleSignUp(email, password);
+        else if (mode === 'reset') await handlePasswordReset(email);
+      });
+    }
+    document.querySelectorAll('[data-mode]').forEach(el => {
+      el.addEventListener('click', () => {
+        state.authMode = el.dataset.mode;
+        state.authError = null;
+        state.resetSent = false;
+        render();
+      });
     });
-    document.querySelectorAll('[data-toggle-complete]').forEach(function (el) {
-      el.addEventListener('click', function (e) {
+  }
+
+  function bindAppEvents() {
+    document.querySelectorAll('[data-tab]').forEach(el => {
+      el.addEventListener('click', () => switchProperty(el.dataset.tab));
+    });
+    document.querySelectorAll('[data-toggle-complete]').forEach(el => {
+      el.addEventListener('click', (e) => {
         e.stopPropagation();
         toggleComplete(state.activeProperty, el.dataset.toggleComplete);
       });
     });
-    document.querySelectorAll('[data-expand]').forEach(function (el) {
-      el.addEventListener('click', function () { toggleExpand(el.dataset.expand); });
+    document.querySelectorAll('[data-expand]').forEach(el => {
+      el.addEventListener('click', () => toggleExpand(el.dataset.expand));
     });
-    document.querySelectorAll('[data-field]').forEach(function (el) {
-      const parts = el.dataset.field.split(':');
-      const svcId = parts[0];
-      const field = parts[1];
-      // Update state on every keystroke (silent — no re-render so focus is preserved)
-      el.addEventListener('input', function () {
+    document.querySelectorAll('[data-field]').forEach(el => {
+      const [svcId, field] = el.dataset.field.split(':');
+      el.addEventListener('input', () => {
         updateService(state.activeProperty, svcId, { [field]: el.value });
       });
     });
-    document.querySelectorAll('[data-mark-complete]').forEach(function (el) {
-      el.addEventListener('click', function () {
-        toggleComplete(state.activeProperty, el.dataset.markComplete);
-      });
+    document.querySelectorAll('[data-mark-complete]').forEach(el => {
+      el.addEventListener('click', () => toggleComplete(state.activeProperty, el.dataset.markComplete));
     });
     const exportBtn = document.getElementById('export-btn');
     if (exportBtn) exportBtn.addEventListener('click', exportBackup);
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) logoutBtn.addEventListener('click', handleSignOut);
   }
 
   // ============ INIT ============
-  function init() {
-    load();
+  if (configMissing) {
     render();
-  }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
   } else {
-    init();
+    onAuthStateChanged(auth, async (user) => {
+      state.authUser = user;
+      state.authLoading = false;
+      if (firestoreUnsub) { firestoreUnsub(); firestoreUnsub = null; }
+      if (user) {
+        await loadUserData(user.uid);
+        setupRealtimeSync(user.uid);
+      } else {
+        state.data = blankData();
+        state.savedAt = null;
+        state.saving = false;
+        state.expanded = null;
+        state.activeProperty = 'townsend';
+        state.authMode = 'signin';
+        state.authError = null;
+        state.resetSent = false;
+      }
+      render();
+    });
   }
-})();
 </script>
 </body>
 </html>
