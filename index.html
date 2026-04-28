@@ -280,7 +280,12 @@
       merged[p.id] = {};
       SERVICES.forEach(s => {
         const remoteSvc = (remote[p.id] && remote[p.id][s.id]) || {};
-        merged[p.id][s.id] = Object.assign(emptyService(), remoteSvc);
+        const sv = Object.assign(emptyService(), remoteSvc);
+        // Auto-link: if a vendor or date is present, make sure the matching chip flag is set
+        if (sv.vendor && !sv.vendorPicked) sv.vendorPicked = true;
+        if (sv.callDate && !sv.callMade) sv.callMade = true;
+        if (sv.completedDate && !sv.completed) sv.completed = true;
+        merged[p.id][s.id] = sv;
       });
     });
     return merged;
@@ -527,6 +532,28 @@
       updateSaveIndicator();
     }
     if (window.lucide) window.lucide.createIcons();
+  }
+
+  // Re-render but keep the cursor where the user was typing — used for text fields
+  // whose state changes affect chips elsewhere on the page.
+  function renderPreservingFocus() {
+    const active = document.activeElement;
+    let focusKey = null;
+    let cursorPos = null;
+    if (active && active.dataset && active.dataset.field) {
+      focusKey = active.dataset.field;
+      try { cursorPos = active.selectionStart; } catch (e) {}
+    }
+    render();
+    if (focusKey) {
+      const newEl = document.querySelector('[data-field="' + focusKey + '"]');
+      if (newEl) {
+        newEl.focus();
+        if (cursorPos != null && typeof newEl.setSelectionRange === 'function') {
+          try { newEl.setSelectionRange(cursorPos, cursorPos); } catch (e) {}
+        }
+      }
+    }
   }
 
   function spinnerSvg(classes) {
@@ -1025,20 +1052,35 @@
           }
         }
 
+        // Detect vendor empty <-> non-empty transition so we know whether the chip needs to flip
+        let vendorTransition = false;
+        const current = state.data[state.activeProperty] && state.data[state.activeProperty][svcId];
+        if (field === 'vendor' && current) {
+          vendorTransition = !!current.vendor !== !!value;
+        }
+
         const patch = { [field]: value };
-        // Auto-link date entries to their matching chip:
+        // Auto-link entries to their matching chip:
+        //   typing a vendor name → mark Vendor as picked
         //   typing a callDate → mark Called as done
         //   typing a completedDate → mark Finished as done
         //   (scheduled chip is already derived directly from scheduledDate)
-        if (field === 'callDate') {
+        if (field === 'vendor') {
+          patch.vendorPicked = !!value;
+        } else if (field === 'callDate') {
           patch.callMade = !!value;
         } else if (field === 'completedDate') {
           patch.completed = !!value;
         }
         updateService(state.activeProperty, svcId, patch);
-        // Re-render after a date change so the chip in the row updates immediately
+
+        // Re-render strategy:
+        //   Date inputs: always render (focus loss is fine — user just picked a date)
+        //   Vendor: only render on transition, preserving cursor
         if (el.type === 'date') {
           render();
+        } else if (vendorTransition) {
+          renderPreservingFocus();
         }
       });
     });
