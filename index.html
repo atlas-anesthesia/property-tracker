@@ -957,7 +957,21 @@
     document.querySelectorAll('[data-field]').forEach(el => {
       const [svcId, field] = el.dataset.field.split(':');
       el.addEventListener('input', () => {
-        updateService(state.activeProperty, svcId, { [field]: el.value });
+        const patch = { [field]: el.value };
+        // Auto-link date entries to their matching chip:
+        //   typing a callDate → mark Called as done
+        //   typing a completedDate → mark Finished as done
+        //   (scheduled chip is already derived directly from scheduledDate)
+        if (field === 'callDate') {
+          patch.callMade = !!el.value;
+        } else if (field === 'completedDate') {
+          patch.completed = !!el.value;
+        }
+        updateService(state.activeProperty, svcId, patch);
+        // Re-render after a date change so the chip in the row updates immediately
+        if (el.type === 'date') {
+          render();
+        }
       });
     });
     document.querySelectorAll('[data-mark-complete]').forEach(el => {
