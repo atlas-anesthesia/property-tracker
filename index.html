@@ -223,8 +223,7 @@
   function blankData() {
     const out = {
       _properties: PROPERTIES.map(p => Object.assign({}, p, {
-        _serviceOrder: SERVICES.map(s => s.id),
-        _hidden: []
+        _serviceOrder: SERVICES.map(s => s.id)
       }))
     };
     PROPERTIES.forEach(p => {
@@ -245,10 +244,12 @@
     return order.map(id => byId[id]).filter(Boolean);
   }
 
-  function getVisibleServicesForProperty(propMeta) {
+  // "Visible" in the list means: outstanding sections only — completed ones are
+  // hidden until the user toggles "Show completed".
+  function getVisibleServicesForProperty(propMeta, propData) {
     const ordered = getOrderedServicesForProperty(propMeta);
-    const hidden = (propMeta && Array.isArray(propMeta._hidden)) ? new Set(propMeta._hidden) : new Set();
-    return ordered.filter(s => !hidden.has(s.id));
+    if (state.showCompleted) return ordered;
+    return ordered.filter(s => !(propData && propData[s.id] && propData[s.id].completed));
   }
 
   function esc(s) {
@@ -350,10 +351,10 @@
         ? p._serviceOrder.filter(id => validIds.has(id))
         : (legacyOrder ? legacyOrder.slice() : SERVICES.map(s => s.id));
       SERVICES.forEach(s => { if (!order.includes(s.id)) order.push(s.id); });
-      const hidden = Array.isArray(p._hidden)
-        ? p._hidden.filter(id => validIds.has(id))
-        : [];
-      return Object.assign({}, p, { _serviceOrder: order, _hidden: hidden });
+      // Drop any legacy `_hidden` field (we now auto-hide based on completion).
+      const next = Object.assign({}, p, { _serviceOrder: order });
+      delete next._hidden;
+      return next;
     });
 
     const merged = { _properties: propList };
@@ -384,6 +385,7 @@
     activeProperty: 'townsend',
     expanded: null,
     propertyInfoExpanded: false,
+    showCompleted: false,
     data: blankData(),
     saving: false,
     savedAt: null
@@ -525,6 +527,7 @@
     state.activeProperty = id;
     state.expanded = null;
     state.propertyInfoExpanded = false;
+    state.showCompleted = false;
     render();
   }
   function toggleExpand(svcId) { state.expanded = state.expanded === svcId ? null : svcId; render(); }
@@ -564,7 +567,7 @@
     }
 
     const tag = romanize(props.length + 1);
-    props.push({ id, name, tag, _serviceOrder: SERVICES.map(s => s.id), _hidden: [] });
+    props.push({ id, name, tag, _serviceOrder: SERVICES.map(s => s.id) });
     state.data._properties = props;
     state.data[id] = {};
     SERVICES.forEach(s => { state.data[id][s.id] = emptyService(); });
@@ -601,8 +604,13 @@
       : SERVICES.map(s => s.id);
     SERVICES.forEach(s => { if (!order.includes(s.id)) order.push(s.id); });
 
-    const hidden = new Set(Array.isArray(propMeta._hidden) ? propMeta._hidden : []);
-    const visible = order.filter(id => !hidden.has(id));
+    // Operate on the currently visible sequence so completed (auto-hidden)
+    // sections are skipped over when reordering.
+    const propData = state.data[state.activeProperty] || {};
+    const visible = order.filter(id => {
+      const sv = propData[id];
+      return state.showCompleted || !(sv && sv.completed);
+    });
     const visIdx = visible.indexOf(svcId);
     if (visIdx === -1) return;
     const swapVisIdx = direction === 'up' ? visIdx - 1 : visIdx + 1;
@@ -621,30 +629,8 @@
     render();
   }
 
-  function hideService(svcId) {
-    const props = (state.data._properties && state.data._properties.slice()) || PROPERTIES.slice();
-    const propIdx = props.findIndex(p => p.id === state.activeProperty);
-    if (propIdx === -1) return;
-    const propMeta = Object.assign({}, props[propIdx]);
-    const hidden = Array.isArray(propMeta._hidden) ? propMeta._hidden.slice() : [];
-    if (!hidden.includes(svcId)) hidden.push(svcId);
-    propMeta._hidden = hidden;
-    props[propIdx] = propMeta;
-    state.data._properties = props;
-    if (state.expanded === svcId) state.expanded = null;
-    scheduleSave();
-    render();
-  }
-
-  function unhideAllServices() {
-    const props = (state.data._properties && state.data._properties.slice()) || PROPERTIES.slice();
-    const propIdx = props.findIndex(p => p.id === state.activeProperty);
-    if (propIdx === -1) return;
-    const propMeta = Object.assign({}, props[propIdx]);
-    propMeta._hidden = [];
-    props[propIdx] = propMeta;
-    state.data._properties = props;
-    scheduleSave();
+  function toggleShowCompleted() {
+    state.showCompleted = !state.showCompleted;
     render();
   }
 
@@ -831,9 +817,9 @@
     }
     const propData = state.data[state.activeProperty] || {};
     const propMeta = props.find(p => p.id === state.activeProperty) || props[0];
-    const visible = getVisibleServicesForProperty(propMeta);
-    const completed = visible.filter(s => propData[s.id] && propData[s.id].completed).length;
-    const progress = visible.length > 0 ? Math.round((completed / visible.length) * 100) : 0;
+    const allServices = getOrderedServicesForProperty(propMeta);
+    const completed = allServices.filter(s => propData[s.id] && propData[s.id].completed).length;
+    const progress = allServices.length > 0 ? Math.round((completed / allServices.length) * 100) : 0;
     const propName = propMeta ? propMeta.name : state.activeProperty;
 
     return '<div class="min-h-screen w-full font-body text-stone-900 relative overflow-x-hidden">'
@@ -841,7 +827,7 @@
         + '<div class="relative z-10 max-w-5xl mx-auto px-6 sm:px-10 py-10 sm:py-14">'
           + renderHeader()
           + renderTabs()
-          + renderPropertyMeter(propName, progress, completed, visible.length)
+          + renderPropertyMeter(propName, progress, completed, allServices.length)
           + renderPropertyInfo()
           + renderRows()
           + renderFooter()
@@ -891,8 +877,8 @@
     const tabs = props.map(p => {
       const isActive = p.id === state.activeProperty;
       const propData = state.data[p.id] || {};
-      const visibleP = getVisibleServicesForProperty(p);
-      const done = visibleP.filter(s => propData[s.id] && propData[s.id].completed).length;
+      const allP = getOrderedServicesForProperty(p);
+      const done = allP.filter(s => propData[s.id] && propData[s.id].completed).length;
       const buttonClasses = 'tab-btn ' + (isActive ? 'active ' : '')
         + 'flex items-center gap-3 px-4 sm:px-5 py-3 rounded-sm flex-1 sm:flex-none '
         + (isActive ? 'bg-stone-900 text-stone-50' : 'hover:bg-stone-900/5 ink');
@@ -903,7 +889,7 @@
       return '<button data-tab="' + esc(p.id) + '" class="' + buttonClasses + '">'
         + '<span class="' + tagClasses + '">' + esc(p.tag) + '</span>'
         + '<span class="font-display text-xl">' + esc(p.name) + '</span>'
-        + '<span class="' + counterClasses + '">' + done + '/' + visibleP.length + '</span>'
+        + '<span class="' + counterClasses + '">' + done + '/' + allP.length + '</span>'
       + '</button>';
     }).join('');
 
@@ -1029,24 +1015,37 @@
   function renderRows() {
     const props = (state.data && state.data._properties) || PROPERTIES;
     const propMeta = props.find(p => p.id === state.activeProperty) || props[0];
-    const visible = getVisibleServicesForProperty(propMeta);
+    const propData = state.data[state.activeProperty] || {};
+    const allServices = getOrderedServicesForProperty(propMeta);
+    const visible = getVisibleServicesForProperty(propMeta, propData);
     const total = visible.length;
-    const hiddenIds = (propMeta && Array.isArray(propMeta._hidden)) ? propMeta._hidden : [];
+    const completedCount = allServices.filter(s => propData[s.id] && propData[s.id].completed).length;
 
-    let hiddenFooter = '';
-    if (hiddenIds.length > 0) {
-      hiddenFooter = '<div class="-mt-3 mb-8 text-center">'
-        + '<button id="show-hidden" class="font-mono text-[10px] tracking-[0.2em] uppercase ink/55 hover:terra transition-colors px-4 py-2">'
-          + '<i data-lucide="eye" class="w-3 h-3 inline-block mr-1.5 align-text-bottom" stroke-width="2"></i>'
-          + 'Show ' + hiddenIds.length + ' hidden section' + (hiddenIds.length === 1 ? '' : 's')
+    let toggleFooter = '';
+    if (completedCount > 0) {
+      const label = state.showCompleted
+        ? '<i data-lucide="eye-off" class="w-3 h-3 inline-block mr-1.5 align-text-bottom" stroke-width="2"></i>Hide ' + completedCount + ' completed'
+        : '<i data-lucide="eye" class="w-3 h-3 inline-block mr-1.5 align-text-bottom" stroke-width="2"></i>Show ' + completedCount + ' completed';
+      toggleFooter = '<div class="-mt-3 mb-8 text-center">'
+        + '<button id="toggle-completed" class="font-mono text-[10px] tracking-[0.2em] uppercase ink/55 hover:terra transition-colors px-4 py-2">'
+          + label
         + '</button>'
+      + '</div>';
+    }
+
+    let emptyState = '';
+    if (visible.length === 0 && allServices.length > 0) {
+      emptyState = '<div class="text-center py-10 mb-8">'
+        + '<div class="font-mono text-[11px] tracking-[0.25em] uppercase ink/55 mb-2">All clear</div>'
+        + '<div class="font-display text-2xl ink/70">Every section is completed</div>'
       + '</div>';
     }
 
     return '<div class="space-y-3 mb-8">'
       + visible.map((svc, idx) => renderRow(svc, idx, total)).join('')
     + '</div>'
-    + hiddenFooter;
+    + emptyState
+    + toggleFooter;
   }
 
   function renderRow(svc, idx, total) {
@@ -1214,15 +1213,9 @@
           + '<span>Status</span><span class="ink/30">·</span>'
           + '<span class="' + (s.completed ? 'sage' : 'terra') + '">' + (s.completed ? 'Completed' : 'Outstanding') + '</span>'
         + '</div>'
-        + '<div class="flex items-center gap-2 flex-wrap">'
-          + '<button data-hide-svc="' + esc(svc.id) + '" class="font-mono text-[10px] tracking-[0.2em] uppercase ink/55 hover:terra transition-colors px-3 py-2" title="Hide this section for this property">'
-            + '<i data-lucide="eye-off" class="w-3 h-3 inline-block mr-1.5 align-text-bottom" stroke-width="2"></i>'
-            + 'Hide'
-          + '</button>'
-          + '<button data-mark-complete="' + esc(svc.id) + '" class="' + statusBtnClass + '">'
-            + (s.completed ? 'Mark Outstanding' : 'Mark Complete')
-          + '</button>'
-        + '</div>'
+        + '<button data-mark-complete="' + esc(svc.id) + '" class="' + statusBtnClass + '">'
+          + (s.completed ? 'Mark Outstanding' : 'Mark Complete')
+        + '</button>'
       + '</div>'
     + '</div>';
   }
@@ -1405,14 +1398,8 @@
         moveService(parts[0], parts[1]);
       });
     });
-    document.querySelectorAll('[data-hide-svc]').forEach(el => {
-      el.addEventListener('click', (e) => {
-        e.stopPropagation();
-        hideService(el.dataset.hideSvc);
-      });
-    });
-    const showHiddenBtn = document.getElementById('show-hidden');
-    if (showHiddenBtn) showHiddenBtn.addEventListener('click', unhideAllServices);
+    const toggleCompletedBtn = document.getElementById('toggle-completed');
+    if (toggleCompletedBtn) toggleCompletedBtn.addEventListener('click', toggleShowCompleted);
     document.querySelectorAll('[data-prop-field]').forEach(el => {
       el.addEventListener('input', () => {
         let value = el.value;
