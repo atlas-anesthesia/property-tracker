@@ -108,6 +108,37 @@
 
   .spin { animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  .reorder-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border-right: 1px solid rgba(28, 25, 23, 0.08);
+    padding: 0 0.4rem;
+    gap: 2px;
+  }
+  .reorder-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    border-radius: 3px;
+    transition: background-color 0.15s ease, color 0.15s ease;
+    color: rgba(28,25,23,0.45);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+  }
+  .reorder-btn:hover:not(:disabled) {
+    background-color: rgba(28,25,23,0.06);
+    color: rgba(28,25,23,0.75);
+  }
+  .reorder-btn:disabled {
+    opacity: 0.2;
+    cursor: not-allowed;
+  }
 </style>
 </head>
 <body>
@@ -170,7 +201,10 @@
     { id: 'plumbing', name: 'Plumbing', icon: 'droplet', blurb: 'Pipes, fixtures & drainage' },
     { id: 'gas',      name: 'Gas',      icon: 'flame',   blurb: 'Lines, meters & connections' },
     { id: 'hvac',     name: 'HVAC',     icon: 'wind',    blurb: 'Heating, cooling & ventilation' },
-    { id: 'skirting', name: 'Skirting & Stairs', icon: 'layers',  blurb: 'Foundation skirting & exterior stairs' }
+    { id: 'skirting', name: 'Skirting & Stairs', icon: 'layers',  blurb: 'Foundation skirting & exterior stairs' },
+    { id: 'permits',  name: 'Permits',  icon: 'clipboard-list', blurb: 'Permits & approvals' },
+    { id: 'blocking', name: 'Blocking', icon: 'package',        blurb: 'Foundation blocking' },
+    { id: 'anchors',  name: 'Anchors',  icon: 'anchor',         blurb: 'Tie-down anchors' }
   ];
 
   const LEGACY_STORAGE_KEY = 'all-day-investments-tracker-v1';
@@ -187,12 +221,30 @@
     };
   }
   function blankData() {
-    const out = { _properties: PROPERTIES.slice() };
+    const out = { _properties: PROPERTIES.slice(), _serviceOrder: SERVICES.map(s => s.id) };
     PROPERTIES.forEach(p => {
       out[p.id] = {};
       SERVICES.forEach(s => { out[p.id][s.id] = emptyService(); });
     });
     return out;
+  }
+
+  function getOrderedServices() {
+    const order = (state.data && state.data._serviceOrder) || SERVICES.map(s => s.id);
+    const byId = {};
+    SERVICES.forEach(s => { byId[s.id] = s; });
+    const result = [];
+    const seen = new Set();
+    order.forEach(id => {
+      if (byId[id] && !seen.has(id)) {
+        result.push(byId[id]);
+        seen.add(id);
+      }
+    });
+    SERVICES.forEach(s => {
+      if (!seen.has(s.id)) result.push(s);
+    });
+    return result;
   }
 
   function esc(s) {
@@ -281,6 +333,15 @@
       propList = PROPERTIES.slice();
     }
     const merged = { _properties: propList };
+
+    // Sanitize and complete the saved service order
+    const validIds = new Set(SERVICES.map(s => s.id));
+    let order = Array.isArray(remote._serviceOrder)
+      ? remote._serviceOrder.filter(id => validIds.has(id))
+      : [];
+    SERVICES.forEach(s => { if (!order.includes(s.id)) order.push(s.id); });
+    merged._serviceOrder = order;
+
     propList.forEach(p => {
       merged[p.id] = {};
       SERVICES.forEach(s => {
@@ -509,6 +570,20 @@
     delete state.data[state.activeProperty];
     state.activeProperty = state.data._properties[0].id;
     state.expanded = null;
+    scheduleSave();
+    render();
+  }
+
+  function moveService(svcId, direction) {
+    const order = (state.data._serviceOrder && state.data._serviceOrder.slice()) || SERVICES.map(s => s.id);
+    const idx = order.indexOf(svcId);
+    if (idx === -1) return;
+    const newIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (newIdx < 0 || newIdx >= order.length) return;
+    const tmp = order[idx];
+    order[idx] = order[newIdx];
+    order[newIdx] = tmp;
+    state.data._serviceOrder = order;
     scheduleSave();
     render();
   }
@@ -890,12 +965,14 @@
   }
 
   function renderRows() {
+    const ordered = getOrderedServices();
+    const total = ordered.length;
     return '<div class="space-y-3 mb-8">'
-      + SERVICES.map((svc, idx) => renderRow(svc, idx)).join('')
+      + ordered.map((svc, idx) => renderRow(svc, idx, total)).join('')
     + '</div>';
   }
 
-  function renderRow(svc, idx) {
+  function renderRow(svc, idx, total) {
     const s = state.data[state.activeProperty][svc.id];
     const isOpen = state.expanded === svc.id;
 
@@ -930,8 +1007,19 @@
 
     const chevronClass = 'w-5 h-5 ink/50 flex-shrink-0 mt-3 transition-transform ' + (isOpen ? 'rotate-180' : '');
 
+    const upDisabled = idx === 0 ? ' disabled' : '';
+    const downDisabled = idx === (total - 1) ? ' disabled' : '';
+
     return '<article class="bg-[#FAF6EC] border border-stone-900/10 rounded-sm card-shadow transition-all ' + (s.completed ? 'opacity-90' : '') + '">'
       + '<div class="flex items-stretch">'
+        + '<div class="reorder-col">'
+          + '<button class="reorder-btn" data-move-svc="' + esc(svc.id) + ':up" title="Move up" aria-label="Move up"' + upDisabled + '>'
+            + '<i data-lucide="chevron-up" class="w-3.5 h-3.5" stroke-width="2"></i>'
+          + '</button>'
+          + '<button class="reorder-btn" data-move-svc="' + esc(svc.id) + ':down" title="Move down" aria-label="Move down"' + downDisabled + '>'
+            + '<i data-lucide="chevron-down" class="w-3.5 h-3.5" stroke-width="2"></i>'
+          + '</button>'
+        + '</div>'
         + '<button data-toggle-complete="' + esc(svc.id) + '" '
             + 'class="flex-shrink-0 px-5 sm:px-6 flex items-center justify-center border-r border-stone-900/10 hover:bg-stone-900/5 transition-colors" '
             + 'aria-label="' + (s.completed ? 'Mark incomplete' : 'Mark complete') + '">'
@@ -1063,7 +1151,7 @@
       : '';
     return '<footer class="mt-16 pt-6 border-t rule">'
       + '<div class="flex items-center justify-between flex-wrap gap-3 font-mono text-[10px] tracking-[0.2em] uppercase ink/50">'
-        + '<span>' + props.length + ' propert' + (props.length === 1 ? 'y' : 'ies') + ' · Five services each</span>'
+        + '<span>' + props.length + ' propert' + (props.length === 1 ? 'y' : 'ies') + ' · ' + SERVICES.length + ' items each</span>'
         + '<div class="flex items-center gap-3 flex-wrap">'
           + removeBtn
           + '<button id="export-btn" class="hover:terra transition-colors uppercase tracking-[0.2em]">Export backup</button>'
@@ -1226,6 +1314,13 @@
     if (removePropBtn) removePropBtn.addEventListener('click', removeProperty);
     document.querySelectorAll('[data-property-info-toggle]').forEach(el => {
       el.addEventListener('click', togglePropertyInfo);
+    });
+    document.querySelectorAll('[data-move-svc]').forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const parts = el.dataset.moveSvc.split(':');
+        moveService(parts[0], parts[1]);
+      });
     });
     document.querySelectorAll('[data-prop-field]').forEach(el => {
       el.addEventListener('input', () => {
